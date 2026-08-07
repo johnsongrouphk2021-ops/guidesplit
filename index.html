@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GuideSplit</title>
+  <style>
+    :root{--bg:#10131a;--panel:#181d27;--line:#313b4d;--text:#edf2ff;--muted:#a6b0c3;--green:#72e1a9;--guide:#ffd166}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif}header{height:62px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 24px}h1{font-size:18px;margin:0}header span{font-size:12px;color:var(--muted)}.app{display:grid;grid-template-columns:320px 1fr;min-height:calc(100vh - 62px)}aside{padding:20px;background:var(--panel);border-right:1px solid var(--line);overflow:auto}section{padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid var(--line)}section:last-child{border:0;margin:0}h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}label{display:block;font-size:12px;color:var(--muted);margin:9px 0 4px}input,select,button{font:inherit}input[type=number],input[type=text],select{width:100%;padding:8px 9px;border-radius:6px;background:#0c1016;border:1px solid var(--line);color:var(--text)}input[type=file]{max-width:100%;color:var(--muted)}button{width:100%;margin-top:8px;padding:9px 10px;border-radius:6px;border:1px solid var(--line);background:#252e3e;color:var(--text);cursor:pointer}button:hover{border-color:#70809d}button.primary{background:var(--green);border-color:var(--green);color:#102218;font-weight:750}button.danger{color:#ffb4ad}.two{display:grid;grid-template-columns:1fr 1fr;gap:9px}.hint,#status{font-size:12px;color:var(--muted);margin:9px 0 0}.readout{white-space:pre-line;font-variant-numeric:tabular-nums;background:#0b0e14;border-radius:6px;padding:9px;color:#dbe6fc;font-size:12px}.area-list{max-height:180px;overflow:auto;font-size:12px;color:var(--muted)}.area-list div{border-bottom:1px solid #293244;padding:5px 0}.area-list b{color:var(--text);font-weight:600}main{overflow:auto;padding:24px}#empty{max-width:560px;margin:15vh auto;text-align:center;color:var(--muted)}#empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:18px}#stage{display:none;width:max-content;min-width:100%;padding:20px;border:1px solid var(--line);background:#0b0e14;border-radius:9px}#viewport{position:relative;width:max-content;box-shadow:0 0 0 1px #3b4558}canvas{display:block}#corner{position:absolute;left:0;top:0;width:28px;height:28px;background:#171c26;border-right:1px solid #3b4558;border-bottom:1px solid #3b4558}#topRuler{position:absolute;left:28px;top:0}#leftRuler{position:absolute;left:0;top:28px}#imageCanvas{position:absolute;left:28px;top:28px;cursor:crosshair}.hidden{display:none}@media(max-width:760px){.app{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}main{padding:12px}}
+  </style>
+</head>
+<body>
+<header><h1>GuideSplit</h1><span>Guide-based image splitter · browser-only</span></header>
+<div class="app">
+  <aside>
+    <section><h2>1 · Upload image</h2><input id="file" type="file" accept="image/png,image/jpeg,image/webp"/><p class="hint">The file stays in your browser. Nothing is uploaded to a server.</p></section>
+    <section><h2>2 · Place guides</h2><label for="zoom">Canvas zoom (%)</label><input id="zoom" type="number" value="50" min="10" max="200" step="10"/><button id="fit">Fit image in workspace</button><button id="clear" class="danger">Clear all guides</button><div id="readout" class="readout">Upload an image to begin.</div><p class="hint">Drag from the <b>top ruler</b> to add a vertical guide. Drag from the <b>left ruler</b> to add a horizontal guide. Drag a guide to reposition it. Image edges are always split boundaries.</p></section>
+    <section><h2>3 · Split preview</h2><div id="areas" class="area-list">No output areas yet.</div><p class="hint">Vertical guides split columns; horizontal guides split rows. Three vertical guides create four output images.</p></section>
+    <section><h2>4 · Export</h2><label for="sizeMode">Output dimensions</label><select id="sizeMode"><option value="original">Keep guide-defined dimensions</option><option value="custom">Resize every export to custom dimensions</option></select><div id="customSize" class="two hidden"><div><label for="outputW">Width (px)</label><input id="outputW" type="number" value="1080" min="1"/></div><div><label for="outputH">Height (px)</label><input id="outputH" type="number" value="1350" min="1"/></div></div><label for="format">File format</label><select id="format"><option value="image/png">PNG</option><option value="image/jpeg">JPG</option><option value="image/webp">WebP</option></select><label for="prefix">Filename prefix</label><input id="prefix" value="split" type="text"/><button id="export" class="primary">Export guide-defined images</button><p id="status" aria-live="polite"></p></section>
+  </aside>
+  <main><div id="empty"><strong>Upload an image to start</strong>Place divider guides at the exact pixels where the image should be cut. The image edges plus your guides become the exported regions.</div><div id="stage"><div id="viewport"><div id="corner"></div><canvas id="topRuler"></canvas><canvas id="leftRuler"></canvas><canvas id="imageCanvas"></canvas></div></div></main>
+</div>
+<script>
+(() => {
+  const $=id=>document.getElementById(id), R=28;
+  const file=$('file'), canvas=$('imageCanvas'), top=$('topRuler'), left=$('leftRuler');
+  const ctx=canvas.getContext('2d'), tctx=top.getContext('2d'), lctx=left.getContext('2d');
+  let image=null, scale=.5, vertical=[], horizontal=[], active=null;
+  const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+  const integer=id=>Math.max(1,Math.round(Number($(id).value)||1));
+  const sorted=a=>[...a].sort((x,y)=>x-y);
+  function boundaries(guides,max){return [0,...sorted(guides).filter(v=>v>0&&v<max),max]}
+  function regions(){if(!image)return[];const xs=boundaries(vertical,image.naturalWidth),ys=boundaries(horizontal,image.naturalHeight),all=[];for(let r=0;r<ys.length-1;r++)for(let c=0;c<xs.length-1;c++)all.push({row:r+1,col:c+1,x:xs[c],y:ys[r],w:xs[c+1]-xs[c],h:ys[r+1]-ys[r]});return all}
+  function drawRulers(){
+    const w=canvas.width,h=canvas.height;top.width=w;top.height=R;left.width=R;left.height=h;tctx.fillStyle=lctx.fillStyle='#171c26';tctx.fillRect(0,0,w,R);lctx.fillRect(0,0,R,h);tctx.strokeStyle=lctx.strokeStyle='#69758b';tctx.fillStyle=lctx.fillStyle='#aeb9cd';tctx.font=lctx.font='10px system-ui';
+    const step=scale>=1?50:scale>=.5?100:200;
+    for(let x=0;x<=image.naturalWidth;x+=step){let p=Math.round(x*scale);tctx.beginPath();tctx.moveTo(p,R);tctx.lineTo(p,x%(step*5)===0?8:15);tctx.stroke();if(x%(step*5)===0)tctx.fillText(x,p+2,10)}
+    for(let y=0;y<=image.naturalHeight;y+=step){let p=Math.round(y*scale);lctx.beginPath();lctx.moveTo(R,p);lctx.lineTo(y%(step*5)===0?8:15,p);lctx.stroke();if(y%(step*5)===0){lctx.save();lctx.translate(10,p+2);lctx.rotate(-Math.PI/2);lctx.fillText(y,0,0);lctx.restore()}}
+  }
+  function updatePanel(){
+    if(!image)return;const all=regions();$('readout').textContent=`Image: ${image.naturalWidth} × ${image.naturalHeight}px\nVertical guides: ${vertical.length} → ${vertical.length+1} columns\nHorizontal guides: ${horizontal.length} → ${horizontal.length+1} rows\nExport files: ${all.length}`;
+    $('areas').innerHTML=all.map(a=>`<div><b>R${String(a.row).padStart(2,'0')} C${String(a.col).padStart(2,'0')}</b> · ${Math.round(a.w)} × ${Math.round(a.h)}px <span>(${Math.round(a.x)}, ${Math.round(a.y)})</span></div>`).join('');
+  }
+  function draw(){
+    if(!image)return;canvas.width=Math.round(image.naturalWidth*scale);canvas.height=Math.round(image.naturalHeight*scale);canvas.style.width=canvas.width+'px';canvas.style.height=canvas.height+'px';top.style.width=canvas.width+'px';left.style.height=canvas.height+'px';$('viewport').style.width=canvas.width+R+'px';$('viewport').style.height=canvas.height+R+'px';ctx.drawImage(image,0,0,canvas.width,canvas.height);drawRulers();
+    ctx.save();ctx.strokeStyle='#ffd166';ctx.fillStyle='#ffd166';ctx.lineWidth=1;for(const x of vertical){const p=x*scale;ctx.beginPath();ctx.moveTo(p,0);ctx.lineTo(p,canvas.height);ctx.stroke();ctx.fillRect(p-3,0,6,6)}for(const y of horizontal){const p=y*scale;ctx.beginPath();ctx.moveTo(0,p);ctx.lineTo(canvas.width,p);ctx.stroke();ctx.fillRect(0,p-3,6,6)}ctx.restore();updatePanel();
+  }
+  function imagePosition(e){const r=canvas.getBoundingClientRect();return{x:clamp((e.clientX-r.left)/scale,0,image.naturalWidth),y:clamp((e.clientY-r.top)/scale,0,image.naturalHeight)}}
+  function closest(a,value){let index=-1,best=9/scale;a.forEach((v,i)=>{if(Math.abs(v-value)<best){best=Math.abs(v-value);index=i}});return index}
+  canvas.addEventListener('pointerdown',e=>{if(!image)return;const p=imagePosition(e),v=closest(vertical,p.x),h=closest(horizontal,p.y);if(v>=0)active={axis:'v',index:v};else if(h>=0)active={axis:'h',index:h};else return;canvas.setPointerCapture(e.pointerId)});
+  canvas.addEventListener('pointermove',e=>{if(!active||!image)return;const p=imagePosition(e);if(active.axis==='v')vertical[active.index]=p.x;else horizontal[active.index]=p.y;draw()});
+  canvas.addEventListener('pointerup',()=>{active=null});
+  function addGuide(axis,e){if(!image)return;const rect=(axis==='v'?top:left).getBoundingClientRect();const value=axis==='v'?(e.clientX-rect.left)/scale:(e.clientY-rect.top)/scale;const list=axis==='v'?vertical:horizontal;list.push(clamp(value,1,(axis==='v'?image.naturalWidth:image.naturalHeight)-1));active={axis,index:list.length-1};canvas.setPointerCapture(e.pointerId);draw()}
+  top.addEventListener('pointerdown',e=>addGuide('v',e));left.addEventListener('pointerdown',e=>addGuide('h',e));
+  file.addEventListener('change',e=>{const selected=e.target.files[0];if(!selected)return;const url=URL.createObjectURL(selected);image=new Image();image.onload=()=>{URL.revokeObjectURL(url);vertical=[];horizontal=[];$('empty').style.display='none';$('stage').style.display='block';draw()};image.src=url});
+  $('zoom').addEventListener('change',()=>{scale=clamp(Number($('zoom').value)/100,.1,2);draw()});
+  $('fit').onclick=()=>{if(!image)return;scale=clamp((Math.min(window.innerWidth-390,1100)-R)/image.naturalWidth,.1,1);$('zoom').value=Math.round(scale*100);draw()};
+  $('clear').onclick=()=>{vertical=[];horizontal=[];draw()};
+  $('sizeMode').addEventListener('change',()=>{$('customSize').classList.toggle('hidden',$('sizeMode').value!=='custom')});
+  function blobDownload(c,name,type){return new Promise(resolve=>c.toBlob(blob=>{const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>{URL.revokeObjectURL(url);resolve()},250)},type,type==='image/jpeg'?.92:undefined))}
+  $('export').onclick=async()=>{
+    if(!image)return;const all=regions(),type=$('format').value,ext=type.split('/')[1].replace('jpeg','jpg'),prefix=$('prefix').value.trim()||'split',custom=$('sizeMode').value==='custom',outW=integer('outputW'),outH=integer('outputH');$('status').textContent=`Preparing ${all.length} file${all.length===1?'':'s'}…`;
+    for(let i=0;i<all.length;i++){const a=all[i],out=document.createElement('canvas');out.width=custom?outW:Math.round(a.w);out.height=custom?outH:Math.round(a.h);const o=out.getContext('2d');if(type==='image/jpeg'){o.fillStyle='white';o.fillRect(0,0,out.width,out.height)}o.drawImage(image,a.x,a.y,a.w,a.h,0,0,out.width,out.height);await blobDownload(out,`${prefix}_r${String(a.row).padStart(2,'0')}_c${String(a.col).padStart(2,'0')}.${ext}`,type);$('status').textContent=`Exported ${i+1} of ${all.length}…`}
+    $('status').textContent=`Done — ${all.length} separate file${all.length===1?'':'s'} exported.`
+  };
+})();
+</script>
+</body>
+</html>
